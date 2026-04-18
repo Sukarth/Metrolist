@@ -7,6 +7,7 @@ package com.metrolist.music.sync
 
 import android.content.Context
 import androidx.datastore.preferences.core.edit
+import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
@@ -58,6 +59,7 @@ object DownloadedPlaylistAutoSyncScheduler {
         val workManager = WorkManager.getInstance(context)
         if (!enabled || !ytmSyncEnabled || trackedPlaylistIds.isEmpty()) {
             workManager.cancelUniqueWork(PERIODIC_WORK_NAME)
+            workManager.cancelUniqueWork(IMMEDIATE_WORK_NAME)
             return
         }
 
@@ -65,6 +67,11 @@ object DownloadedPlaylistAutoSyncScheduler {
             intervalHours.toLong(),
             TimeUnit.HOURS,
         )
+            .setBackoffCriteria(
+                BackoffPolicy.EXPONENTIAL,
+                10,
+                TimeUnit.MINUTES,
+            )
             .setConstraints(
                 Constraints.Builder()
                     .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -82,6 +89,11 @@ object DownloadedPlaylistAutoSyncScheduler {
 
     fun enqueueImmediateSync(context: Context) {
         val immediateRequest = OneTimeWorkRequestBuilder<DownloadedPlaylistAutoSyncWorker>()
+            .setBackoffCriteria(
+                BackoffPolicy.EXPONENTIAL,
+                10,
+                TimeUnit.MINUTES,
+            )
             .setConstraints(
                 Constraints.Builder()
                     .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -94,6 +106,15 @@ object DownloadedPlaylistAutoSyncScheduler {
             ExistingWorkPolicy.REPLACE,
             immediateRequest
         )
+    }
+
+    suspend fun enqueueImmediateSyncIfEligible(context: Context, playlistId: String? = null) {
+        val enabled = context.dataStore.get(DownloadedPlaylistAutoSyncEnabledKey, false)
+        val ytmSyncEnabled = context.dataStore.get(YtmSyncKey, true)
+        val trackedPlaylistIds = readCsvSet(context.dataStore.get(DownloadedPlaylistAutoSyncPlaylistIdsKey, ""))
+        if (!enabled || !ytmSyncEnabled || trackedPlaylistIds.isEmpty()) return
+        if (playlistId != null && playlistId !in trackedPlaylistIds) return
+        enqueueImmediateSync(context)
     }
 
     fun readCsvSet(raw: String?): Set<String> =

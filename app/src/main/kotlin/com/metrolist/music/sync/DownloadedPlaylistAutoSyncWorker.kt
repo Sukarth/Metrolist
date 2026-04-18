@@ -5,13 +5,22 @@
 
 package com.metrolist.music.sync
 
+import android.Manifest
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.datastore.preferences.core.edit
+import androidx.core.app.ActivityCompat
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.net.toUri
 import androidx.media3.exoplayer.offline.DownloadRequest
 import androidx.media3.exoplayer.offline.DownloadService
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.metrolist.music.R
 import com.metrolist.music.constants.DownloadedPlaylistAutoSyncEnabledKey
 import com.metrolist.music.constants.DownloadedPlaylistAutoSyncManagedSongIdsKey
 import com.metrolist.music.constants.DownloadedPlaylistAutoSyncPlaylistIdsKey
@@ -32,6 +41,12 @@ class DownloadedPlaylistAutoSyncWorker(
     appContext: Context,
     params: WorkerParameters,
 ) : CoroutineWorker(appContext, params) {
+    companion object {
+        private const val MAX_RETRY_ATTEMPTS = 3
+        private const val NOTIFICATION_CHANNEL_ID = "downloaded_playlist_sync"
+        private const val FAILURE_NOTIFICATION_ID = 21001
+    }
+
     @EntryPoint
     @InstallIn(SingletonComponent::class)
     interface WorkerEntryPoint {
@@ -48,8 +63,11 @@ class DownloadedPlaylistAutoSyncWorker(
         if (!context.dataStore.get(DownloadedPlaylistAutoSyncEnabledKey, false)) {
             return Result.success()
         }
-        if (!context.isSyncEnabled() || !context.isInternetConnected()) {
+        if (!context.isSyncEnabled()) {
             return Result.success()
+        }
+        if (!context.isInternetConnected()) {
+            return retryOrFailWithNotification()
         }
 
         val trackedPlaylistIds = DownloadedPlaylistAutoSyncScheduler.readCsvSet(
@@ -108,8 +126,48 @@ class DownloadedPlaylistAutoSyncWorker(
             Timber.e(error, "DownloadedPlaylistAutoSyncWorker failed")
         }.fold(
             onSuccess = { Result.success() },
-            onFailure = { Result.retry() }
+            onFailure = { retryOrFailWithNotification() }
         )
+    }
+
+    private fun retryOrFailWithNotification(): Result {
+        if (runAttemptCount + 1 < MAX_RETRY_ATTEMPTS) return Result.retry()
+
+        showFailureNotification()
+        return Result.failure()
+    }
+
+    private fun showFailureNotification() {
+        val context = applicationContext
+        val notificationManager = context.getSystemService(NotificationManager::class.java)
+        if (notificationManager.getNotificationChannel(NOTIFICATION_CHANNEL_ID) == null) {
+            val channel = NotificationChannel(
+                NOTIFICATION_CHANNEL_ID,
+                context.getString(R.string.downloaded_playlist_sync_notification_channel_name),
+                NotificationManager.IMPORTANCE_DEFAULT,
+            ).apply {
+                description =
+                    context.getString(R.string.downloaded_playlist_sync_notification_channel_desc)
+            }
+            notificationManager.createNotificationChannel(channel)
+        }
+
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+
+        val notification = NotificationCompat.Builder(context, NOTIFICATION_CHANNEL_ID)
+            .setSmallIcon(R.drawable.sync)
+            .setContentTitle(context.getString(R.string.downloaded_playlist_sync_failed_title))
+            .setContentText(context.getString(R.string.downloaded_playlist_sync_failed_text))
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setAutoCancel(true)
+            .build()
+        NotificationManagerCompat.from(context).notify(FAILURE_NOTIFICATION_ID, notification)
     }
 
     private suspend fun cleanupManagedDownloads(requiredSongIds: Set<String>) {
