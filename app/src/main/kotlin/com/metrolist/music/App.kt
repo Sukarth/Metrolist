@@ -28,6 +28,7 @@ import com.metrolist.lastfm.LastFM
 import com.metrolist.music.BuildConfig
 import com.metrolist.music.constants.*
 import com.metrolist.music.di.ApplicationScope
+import com.metrolist.music.sync.DownloadedPlaylistAutoSyncScheduler
 import com.metrolist.music.extensions.toEnum
 import com.metrolist.music.extensions.toInetSocketAddress
 import com.metrolist.music.utils.CrashHandler
@@ -86,6 +87,9 @@ class App :
         applicationScope.launch {
             initializeSettings()
             observeSettingsChanges()
+        }
+        applicationScope.launch {
+            DownloadedPlaylistAutoSyncScheduler.syncScheduleFromSettings(this@App)
         }
     }
 

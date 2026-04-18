@@ -163,6 +163,14 @@
     <string name="token_shown">Tap again to copy or edit</string>
     <string name="token_adv_login_description">This is an ADVANCED login method. Instead of using the web portal, you can enter or update your login token directly. This can be useful for signing in across multiple devices quickly. Tokens in an unrecognized format will be rejected</string>
     <string name="yt_sync">Auto-sync with account</string>
+    <string name="downloaded_playlist_auto_sync">Downloaded playlists auto-sync</string>
+    <string name="downloaded_playlist_auto_sync_desc">Keeps downloaded YouTube playlists updated in the background by downloading new songs and removing songs no longer in tracked playlists</string>
+    <string name="downloaded_playlist_auto_sync_interval">Background sync interval</string>
+    <string name="downloaded_playlist_auto_sync_interval_value">Every %d hours (tap to change)</string>
+    <string name="downloaded_playlist_sync_notification_channel_name">Playlist sync</string>
+    <string name="downloaded_playlist_sync_notification_channel_desc">Notifications about downloaded playlist background sync failures</string>
+    <string name="downloaded_playlist_sync_failed_title">Playlist sync needs attention</string>
+    <string name="downloaded_playlist_sync_failed_text">Downloaded playlist sync failed repeatedly. Open Metrolist and check your account/network settings.</string>
     <string name="more_content">More content</string>
 
     <string name="sort_ascending">Sort ascending</string>

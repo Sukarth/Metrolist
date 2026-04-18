@@ -126,6 +126,7 @@ import com.metrolist.music.extensions.toMediaItem
 import com.metrolist.music.models.toMediaMetadata
 import com.metrolist.music.playback.ExoDownloadService
 import com.metrolist.music.playback.queues.ListQueue
+import com.metrolist.music.sync.DownloadedPlaylistAutoSyncScheduler
 import com.metrolist.music.ui.component.ActionPromptDialog
 import com.metrolist.music.ui.component.DefaultDialog
 import com.metrolist.music.ui.component.DraggableScrollbar
@@ -366,6 +367,17 @@ fun LocalPlaylistScreen(
                                 song.song.id,
                                 false,
                             )
+                        }
+                        val currentPlaylistId = playlist?.id
+                        playlist?.playlist?.browseId?.let {
+                            scope.launch(Dispatchers.IO) {
+                                currentPlaylistId?.let { playlistId ->
+                                    DownloadedPlaylistAutoSyncScheduler.unregisterPlaylistForAutoSync(
+                                        context = context,
+                                        playlistId = playlistId
+                                    )
+                                }
+                            }
                         }
                     },
                 ) {
@@ -1387,6 +1399,14 @@ fun LocalPlaylistHeader(
                                                 false,
                                             )
                                         }
+                                        playlist.playlist.browseId?.let {
+                                            scope.launch(Dispatchers.IO) {
+                                                DownloadedPlaylistAutoSyncScheduler.unregisterPlaylistForAutoSync(
+                                                    context = context,
+                                                    playlistId = playlist.id
+                                                )
+                                            }
+                                        }
                                     }
 
                                     else -> {
@@ -1405,6 +1425,14 @@ fun LocalPlaylistHeader(
                                                 downloadRequest,
                                                 false,
                                             )
+                                        }
+                                        playlist.playlist.browseId?.let {
+                                            scope.launch(Dispatchers.IO) {
+                                                DownloadedPlaylistAutoSyncScheduler.registerPlaylistForAutoSync(
+                                                    context = context,
+                                                    playlistId = playlist.id
+                                                )
+                                            }
                                         }
                                     }
                                 }

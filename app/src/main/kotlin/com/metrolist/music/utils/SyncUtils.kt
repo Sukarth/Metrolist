@@ -17,6 +17,8 @@ import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.utils.completed
 import com.metrolist.innertube.utils.parseCookieString
 import com.metrolist.lastfm.LastFM
+import com.metrolist.music.constants.DownloadedPlaylistAutoSyncEnabledKey
+import com.metrolist.music.constants.DownloadedPlaylistAutoSyncPlaylistIdsKey
 import com.metrolist.music.constants.InnerTubeCookieKey
 import com.metrolist.music.constants.LastFMUseSendLikes
 import com.metrolist.music.constants.LastFullSyncKey
@@ -32,6 +34,7 @@ import com.metrolist.music.extensions.collectLatest
 import com.metrolist.music.extensions.isInternetConnected
 import com.metrolist.music.extensions.isSyncEnabled
 import com.metrolist.music.models.toMediaMetadata
+import com.metrolist.music.sync.DownloadedPlaylistAutoSyncScheduler
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -394,6 +397,16 @@ class SyncUtils @Inject constructor(
         }
     }
 
+    private suspend fun triggerDownloadedPlaylistLiveSyncIfTracked(playlistId: String) {
+        if (!context.dataStore.get(DownloadedPlaylistAutoSyncEnabledKey, false)) return
+        if (!context.isSyncEnabled()) return
+        val trackedPlaylistIds = DownloadedPlaylistAutoSyncScheduler.readCsvSet(
+            context.dataStore.get(DownloadedPlaylistAutoSyncPlaylistIdsKey, "")
+        )
+        if (playlistId !in trackedPlaylistIds) return
+        DownloadedPlaylistAutoSyncScheduler.enqueueImmediateSync(context)
+    }
+
     // Suspend versions for direct calls
 
     suspend fun syncLikedSongsSuspend() = executeSyncLikedSongs()
@@ -406,6 +419,15 @@ class SyncUtils @Inject constructor(
     suspend fun syncEpisodesForLaterSuspend() = executeSyncEpisodesForLater()
     suspend fun syncSavedPlaylistsSuspend() = executeSyncSavedPlaylists()
     suspend fun syncAutoSyncPlaylistsSuspend() = executeSyncAutoSyncPlaylists()
+    suspend fun syncSinglePlaylistSuspend(
+        browseId: String,
+        playlistId: String,
+        preserveDownloadedSongs: Boolean = true
+    ) = executeSyncPlaylist(
+        browseId = browseId,
+        playlistId = playlistId,
+        preserveDownloadedSongs = preserveDownloadedSongs
+    )
     suspend fun cleanupDuplicatePlaylistsSuspend() = executeCleanupDuplicatePlaylists()
     suspend fun clearAllSyncedContentSuspend() = executeClearAllSyncedContent()
 
@@ -1451,7 +1473,11 @@ class SyncUtils @Inject constructor(
         }
     }
 
-    private suspend fun executeSyncPlaylist(browseId: String, playlistId: String) = withContext(Dispatchers.IO) {
+    private suspend fun executeSyncPlaylist(
+        browseId: String,
+        playlistId: String,
+        preserveDownloadedSongs: Boolean = true
+    ) = withContext(Dispatchers.IO) {
         Timber.d("syncPlaylist: Starting sync for browseId=$browseId, playlistId=$playlistId")
 
         withRetry {
@@ -1493,20 +1519,22 @@ class SyncUtils @Inject constructor(
                             }
                         }
 
-                        downloadedSongIds.forEach { songId ->
-                            if (songId !in remoteIds) {
-                                val existingSong = database.getSongByIdBlocking(songId)
-                                if (existingSong != null) {
-                                    val maxPosition = database.playlistSongsBlocking(playlistId)
-                                        .maxOfOrNull { it.map.position } ?: -1
-                                    database.insert(
-                                        PlaylistSongMap(
-                                            songId = songId,
-                                            playlistId = playlistId,
-                                            position = maxPosition + 1
+                        if (preserveDownloadedSongs) {
+                            downloadedSongIds.forEach { songId ->
+                                if (songId !in remoteIds) {
+                                    val existingSong = database.getSongByIdBlocking(songId)
+                                    if (existingSong != null) {
+                                        val maxPosition = database.playlistSongsBlocking(playlistId)
+                                            .maxOfOrNull { it.map.position } ?: -1
+                                        database.insert(
+                                            PlaylistSongMap(
+                                                songId = songId,
+                                                playlistId = playlistId,
+                                                position = maxPosition + 1
+                                            )
                                         )
-                                    )
-                                    Timber.d("syncPlaylist: Preserved downloaded song $songId in playlist")
+                                        Timber.d("syncPlaylist: Preserved downloaded song $songId in playlist")
+                                    }
                                 }
                             }
                         }
@@ -1666,6 +1694,7 @@ class SyncUtils @Inject constructor(
         playlistId: String
     ) {
         Timber.d("removeFromPlaylistAndAwaitSync: START browseId=$browseId songId=$songId setVideoId=$setVideoId")
+        var removeConfirmedOnYouTube = false
 
         val hasPendingAdd = pendingYouTubeAdds[browseId]?.contains(songId) == true
         Timber.d("removeFromPlaylistAndAwaitSync: hasPendingAdd=$hasPendingAdd")
@@ -1691,13 +1720,20 @@ class SyncUtils @Inject constructor(
                     }.getOrNull()?.songs?.any { it.id == songId } ?: true
                     Timber.d("removeFromPlaylistAndAwaitSync: Poll ${attempt + 1}/10 stillPresent=$stillPresent")
 
-                    if (!stillPresent) return@withContext
+                    if (!stillPresent) {
+                        removeConfirmedOnYouTube = true
+                        return@withContext
+                    }
                 }
                 Timber.w("removeFromPlaylistAndAwaitSync: Timeout reached")
             }
         } finally {
             unmarkPlaylistModifying(playlistId)
             Timber.d("removeFromPlaylistAndAwaitSync: END")
+        }
+
+        if (removeConfirmedOnYouTube) {
+            triggerDownloadedPlaylistLiveSyncIfTracked(playlistId)
         }
     }
 
@@ -1711,6 +1747,7 @@ class SyncUtils @Inject constructor(
     fun unregisterPendingAdd(browseId: String, songId: String) {
         syncScope.launch {
             var deferredRemoval: Triple<String, String, String>? = null
+            var addConfirmedOnYouTube = false
             try {
                 withContext(Dispatchers.IO) {
                     for (attempt in 0 until 10) {
@@ -1722,6 +1759,7 @@ class SyncUtils @Inject constructor(
                         Timber.d("unregisterPendingAdd: Waiting for YouTube to confirm add, attempt ${attempt + 1}/10, found=$songPresent")
 
                         if (songPresent) {
+                            addConfirmedOnYouTube = true
                             Timber.d("unregisterPendingAdd: Add confirmed on YouTube for songId=$songId")
                             break
                         }
@@ -1734,6 +1772,13 @@ class SyncUtils @Inject constructor(
                     if (deferredRemoval != null) {
                         pendingRemovals[browseId]?.remove(deferredRemoval)
                         Timber.d("unregisterPendingAdd: Captured deferred remove for songId=$songId, routing through removeFromPlaylistAndAwaitSync")
+                    }
+                }
+
+                if (addConfirmedOnYouTube) {
+                    val playlistId = database.playlistByBrowseId(browseId).firstOrNull()?.playlist?.id
+                    if (playlistId != null) {
+                        triggerDownloadedPlaylistLiveSyncIfTracked(playlistId)
                     }
                 }
 

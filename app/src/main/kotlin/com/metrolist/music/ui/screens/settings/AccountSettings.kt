@@ -60,10 +60,13 @@ import com.metrolist.music.constants.AccountChannelHandleKey
 import com.metrolist.music.constants.AccountEmailKey
 import com.metrolist.music.constants.AccountNameKey
 import com.metrolist.music.constants.DataSyncIdKey
+import com.metrolist.music.constants.DownloadedPlaylistAutoSyncEnabledKey
+import com.metrolist.music.constants.DownloadedPlaylistAutoSyncIntervalHoursKey
 import com.metrolist.music.constants.InnerTubeCookieKey
 import com.metrolist.music.constants.UseLoginForBrowse
 import com.metrolist.music.constants.VisitorDataKey
 import com.metrolist.music.constants.YtmSyncKey
+import com.metrolist.music.sync.DownloadedPlaylistAutoSyncScheduler
 import com.metrolist.music.ui.component.DefaultDialog
 import com.metrolist.music.ui.component.InfoLabel
 import com.metrolist.music.ui.component.Material3SettingsGroup
@@ -96,6 +99,13 @@ fun AccountSettings(
     }
     val (useLoginForBrowse, onUseLoginForBrowseChange) = rememberPreference(UseLoginForBrowse, true)
     val (ytmSync, onYtmSyncChange) = rememberPreference(YtmSyncKey, true)
+    val (downloadedPlaylistAutoSyncEnabled, onDownloadedPlaylistAutoSyncEnabledChange) =
+        rememberPreference(DownloadedPlaylistAutoSyncEnabledKey, false)
+    val (downloadedPlaylistAutoSyncIntervalHours, onDownloadedPlaylistAutoSyncIntervalHoursChange) =
+        rememberPreference(
+            DownloadedPlaylistAutoSyncIntervalHoursKey,
+            DownloadedPlaylistAutoSyncScheduler.DEFAULT_INTERVAL_HOURS
+        )
 
     val homeViewModel: HomeViewModel = hiltViewModel()
     val accountSettingsViewModel: AccountSettingsViewModel = hiltViewModel()
@@ -298,7 +308,8 @@ fun AccountSettings(
         Spacer(Modifier.height(8.dp))
 
         Material3SettingsGroup(
-            items = listOf(
+            items = buildList {
+                add(
                 Material3SettingsItem(
                     title = {
                         Text(
@@ -315,7 +326,9 @@ fun AccountSettings(
                         else if (!showToken) showToken = true
                         else showTokenEditor = true
                     }
-                ),
+                )
+                )
+                add(
                 Material3SettingsItem(
                     title = { Text(stringResource(R.string.more_content)) },
                     icon = painterResource(R.drawable.cached),
@@ -339,7 +352,9 @@ fun AccountSettings(
                         )
                     },
                     enabled = isLoggedIn
-                ),
+                )
+                )
+                add(
                 Material3SettingsItem(
                     title = { Text(stringResource(R.string.yt_sync)) },
                     icon = painterResource(R.drawable.cached),
@@ -347,7 +362,12 @@ fun AccountSettings(
                         Switch(
                             enabled = isLoggedIn,
                             checked = ytmSync,
-                            onCheckedChange = onYtmSyncChange,
+                            onCheckedChange = {
+                                onYtmSyncChange(it)
+                                scope.launch {
+                                    DownloadedPlaylistAutoSyncScheduler.syncScheduleFromSettings(context)
+                                }
+                            },
                             thumbContent = {
                                 Icon(
                                     painter = painterResource(
@@ -361,7 +381,65 @@ fun AccountSettings(
                     },
                     enabled = isLoggedIn
                 )
-            ),
+                )
+
+                add(
+                    Material3SettingsItem(
+                        title = { Text(stringResource(R.string.downloaded_playlist_auto_sync)) },
+                        description = { Text(stringResource(R.string.downloaded_playlist_auto_sync_desc)) },
+                        icon = painterResource(R.drawable.offline),
+                        trailingContent = {
+                            Switch(
+                                enabled = isLoggedIn && ytmSync,
+                                checked = downloadedPlaylistAutoSyncEnabled,
+                                onCheckedChange = {
+                                    onDownloadedPlaylistAutoSyncEnabledChange(it)
+                                    scope.launch {
+                                        DownloadedPlaylistAutoSyncScheduler.syncScheduleFromSettings(context)
+                                    }
+                                },
+                                thumbContent = {
+                                    Icon(
+                                        painter = painterResource(
+                                            id = if (downloadedPlaylistAutoSyncEnabled) R.drawable.check else R.drawable.close
+                                        ),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(SwitchDefaults.IconSize)
+                                    )
+                                }
+                            )
+                        },
+                        enabled = isLoggedIn
+                    )
+                )
+
+                if (downloadedPlaylistAutoSyncEnabled) {
+                    add(
+                        Material3SettingsItem(
+                            title = { Text(stringResource(R.string.downloaded_playlist_auto_sync_interval)) },
+                            description = {
+                                Text(
+                                    stringResource(
+                                        R.string.downloaded_playlist_auto_sync_interval_value,
+                                        downloadedPlaylistAutoSyncIntervalHours
+                                    )
+                                )
+                            },
+                            icon = painterResource(R.drawable.timer),
+                            enabled = isLoggedIn,
+                            onClick = {
+                                val options = DownloadedPlaylistAutoSyncScheduler.intervalOptionsHours
+                                val currentIndex = options.indexOf(downloadedPlaylistAutoSyncIntervalHours).takeIf { it >= 0 } ?: 0
+                                val nextValue = options[(currentIndex + 1) % options.size]
+                                onDownloadedPlaylistAutoSyncIntervalHoursChange(nextValue)
+                                scope.launch {
+                                    DownloadedPlaylistAutoSyncScheduler.syncScheduleFromSettings(context)
+                                }
+                            }
+                        )
+                    )
+                }
+            },
             useLowContrast = true
         )
 

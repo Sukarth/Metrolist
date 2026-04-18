@@ -163,6 +163,7 @@ import com.metrolist.music.playback.MusicService
 import com.metrolist.music.playback.MusicService.MusicBinder
 import com.metrolist.music.playback.PlayerConnection
 import com.metrolist.music.playback.queues.YouTubeQueue
+import com.metrolist.music.sync.DownloadedPlaylistAutoSyncScheduler
 import com.metrolist.music.ui.component.AccountSettingsDialog
 import com.metrolist.music.ui.component.AppNavigationBar
 import com.metrolist.music.ui.component.AppNavigationRail
@@ -325,6 +326,10 @@ class MainActivity : ComponentActivity() {
                 BIND_AUTO_CREATE,
             )
             isServiceBound = true
+        }
+
+        lifecycleScope.launch {
+            DownloadedPlaylistAutoSyncScheduler.enqueueImmediateSyncIfEligible(this@MainActivity)
         }
     }
 
