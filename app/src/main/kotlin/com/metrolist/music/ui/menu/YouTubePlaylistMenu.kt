@@ -76,6 +76,7 @@ import com.metrolist.music.models.MediaMetadata
 import com.metrolist.music.models.toMediaMetadata
 import com.metrolist.music.playback.ExoDownloadService
 import com.metrolist.music.playback.queues.YouTubeQueue
+import com.metrolist.music.sync.DownloadedPlaylistAutoSyncScheduler
 import com.metrolist.music.ui.component.DefaultDialog
 import com.metrolist.music.ui.component.ListDialog
 import com.metrolist.music.ui.component.Material3MenuGroup
@@ -307,6 +308,14 @@ fun YouTubePlaylistMenu(
                                 song.id,
                                 false,
                             )
+                        }
+                        dbPlaylist?.id?.let { playlistId ->
+                            coroutineScope.launch(Dispatchers.IO) {
+                                DownloadedPlaylistAutoSyncScheduler.unregisterPlaylistForAutoSync(
+                                    context = context,
+                                    playlistId = playlistId
+                                )
+                            }
                         }
                     },
                 ) {
@@ -655,6 +664,14 @@ fun YouTubePlaylistMenu(
                                                         downloadRequest,
                                                         false,
                                                     )
+                                                }
+                                                dbPlaylist?.id?.let { playlistId ->
+                                                    coroutineScope.launch(Dispatchers.IO) {
+                                                        DownloadedPlaylistAutoSyncScheduler.registerPlaylistForAutoSync(
+                                                            context = context,
+                                                            playlistId = playlistId
+                                                        )
+                                                    }
                                                 }
                                             },
                                         )

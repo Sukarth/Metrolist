@@ -59,6 +59,7 @@ import com.metrolist.music.extensions.toMediaItem
 import com.metrolist.music.playback.ExoDownloadService
 import com.metrolist.music.playback.queues.ListQueue
 import com.metrolist.music.playback.queues.YouTubeQueue
+import com.metrolist.music.sync.DownloadedPlaylistAutoSyncScheduler
 import com.metrolist.music.ui.component.DefaultDialog
 import com.metrolist.music.ui.component.Material3MenuGroup
 import com.metrolist.music.ui.component.Material3MenuItemData
@@ -205,6 +206,14 @@ fun PlaylistMenu(
                                 song.id,
                                 false,
                             )
+                        }
+                        playlist.playlist.browseId?.let {
+                            coroutineScope.launch(Dispatchers.IO) {
+                                DownloadedPlaylistAutoSyncScheduler.unregisterPlaylistForAutoSync(
+                                    context = context,
+                                    playlistId = playlist.id
+                                )
+                            }
                         }
                     },
                 ) {
@@ -574,24 +583,32 @@ fun PlaylistMenu(
                                                     contentDescription = null,
                                                 )
                                             },
-                                            onClick = {
-                                                songs.forEach { song ->
-                                                    val downloadRequest =
+                                             onClick = {
+                                                 songs.forEach { song ->
+                                                     val downloadRequest =
                                                         DownloadRequest
                                                             .Builder(song.id, song.id.toUri())
                                                             .setCustomCacheKey(song.id)
                                                             .setData(song.song.title.toByteArray())
                                                             .build()
-                                                    DownloadService.sendAddDownload(
-                                                        context,
-                                                        ExoDownloadService::class.java,
-                                                        downloadRequest,
-                                                        false,
-                                                    )
-                                                }
-                                            },
-                                        )
-                                    }
+                                                     DownloadService.sendAddDownload(
+                                                         context,
+                                                         ExoDownloadService::class.java,
+                                                         downloadRequest,
+                                                         false,
+                                                     )
+                                                 }
+                                                 playlist.playlist.browseId?.let {
+                                                     coroutineScope.launch(Dispatchers.IO) {
+                                                         DownloadedPlaylistAutoSyncScheduler.registerPlaylistForAutoSync(
+                                                             context = context,
+                                                             playlistId = playlist.id
+                                                         )
+                                                     }
+                                                 }
+                                             },
+                                         )
+                                     }
                                 },
                             )
                         }

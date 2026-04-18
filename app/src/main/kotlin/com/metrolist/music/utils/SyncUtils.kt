@@ -406,6 +406,15 @@ class SyncUtils @Inject constructor(
     suspend fun syncEpisodesForLaterSuspend() = executeSyncEpisodesForLater()
     suspend fun syncSavedPlaylistsSuspend() = executeSyncSavedPlaylists()
     suspend fun syncAutoSyncPlaylistsSuspend() = executeSyncAutoSyncPlaylists()
+    suspend fun syncSinglePlaylistSuspend(
+        browseId: String,
+        playlistId: String,
+        preserveDownloadedSongs: Boolean = true
+    ) = executeSyncPlaylist(
+        browseId = browseId,
+        playlistId = playlistId,
+        preserveDownloadedSongs = preserveDownloadedSongs
+    )
     suspend fun cleanupDuplicatePlaylistsSuspend() = executeCleanupDuplicatePlaylists()
     suspend fun clearAllSyncedContentSuspend() = executeClearAllSyncedContent()
 
@@ -1451,7 +1460,11 @@ class SyncUtils @Inject constructor(
         }
     }
 
-    private suspend fun executeSyncPlaylist(browseId: String, playlistId: String) = withContext(Dispatchers.IO) {
+    private suspend fun executeSyncPlaylist(
+        browseId: String,
+        playlistId: String,
+        preserveDownloadedSongs: Boolean = true
+    ) = withContext(Dispatchers.IO) {
         Timber.d("syncPlaylist: Starting sync for browseId=$browseId, playlistId=$playlistId")
 
         withRetry {
@@ -1493,20 +1506,22 @@ class SyncUtils @Inject constructor(
                             }
                         }
 
-                        downloadedSongIds.forEach { songId ->
-                            if (songId !in remoteIds) {
-                                val existingSong = database.getSongByIdBlocking(songId)
-                                if (existingSong != null) {
-                                    val maxPosition = database.playlistSongsBlocking(playlistId)
-                                        .maxOfOrNull { it.map.position } ?: -1
-                                    database.insert(
-                                        PlaylistSongMap(
-                                            songId = songId,
-                                            playlistId = playlistId,
-                                            position = maxPosition + 1
+                        if (preserveDownloadedSongs) {
+                            downloadedSongIds.forEach { songId ->
+                                if (songId !in remoteIds) {
+                                    val existingSong = database.getSongByIdBlocking(songId)
+                                    if (existingSong != null) {
+                                        val maxPosition = database.playlistSongsBlocking(playlistId)
+                                            .maxOfOrNull { it.map.position } ?: -1
+                                        database.insert(
+                                            PlaylistSongMap(
+                                                songId = songId,
+                                                playlistId = playlistId,
+                                                position = maxPosition + 1
+                                            )
                                         )
-                                    )
-                                    Timber.d("syncPlaylist: Preserved downloaded song $songId in playlist")
+                                        Timber.d("syncPlaylist: Preserved downloaded song $songId in playlist")
+                                    }
                                 }
                             }
                         }
